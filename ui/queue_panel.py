@@ -91,7 +91,7 @@ class QueuePanel(Gtk.Box):
 
         self.append(Gtk.Separator())
 
-        self.run_button = Gtk.Button(label="▶ Run Next")
+        self.run_button = Gtk.Button(label="▶ Run Workflow")
         self.run_button.connect(
             "clicked",
             self.on_run_next_clicked,
@@ -286,7 +286,7 @@ class QueuePanel(Gtk.Box):
         if running:
             self.run_button.set_label("▶ Running...")
         else:
-            self.run_button.set_label("▶ Run Next")
+            self.run_button.set_label("▶ Run Workflow")
 
     def on_stop_workflow_clicked(self, widget):
         self.emit("stop-workflow")
@@ -299,3 +299,18 @@ class QueuePanel(Gtk.Box):
         self.stop_button.set_sensitive(
             stoppable
         )
+
+    def set_workflow_stopping(
+        self,
+        stopping,
+    ):
+        self.run_button.set_sensitive(False)
+
+        if stopping:
+            self.run_button.set_label(
+                "⏹ Stopping..."
+            )
+        else:
+            self.run_button.set_label(
+                "▶ Run Workflow"
+            )

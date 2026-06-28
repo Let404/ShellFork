@@ -13,6 +13,8 @@ from core.shell_monitor import ShellMonitor
 
 from core.shell_state import ShellState
 
+from core.session_log import SessionLog
+
 from core.workflow import (
     Workflow,
     WorkflowStep,
@@ -23,6 +25,8 @@ from core.workflow_io import (
     save_workflow,
     load_workflow,
 )
+
+from core.script_export import workflow_to_bash_script
 
 from ui.workflow_tree import WorkflowTree
 
@@ -54,6 +58,14 @@ class MainWindow(Gtk.ApplicationWindow):
         self.workflow_mode = False
 
         self.workflow_paused = False
+
+        self.session_log = SessionLog()
+        self.session_log.add(
+            "SESSION START",
+            "ShellFork started",
+        )
+
+        self.workflow_stopping = False
 
         self.selected_workflow_path = None
 
@@ -210,6 +222,19 @@ class MainWindow(Gtk.ApplicationWindow):
 
         print("Shell ready:", exit_code)
 
+        if self.workflow_stopping:
+            self.workflow_stopping = False
+
+            self.queue_panel.set_workflow_stopping(False)
+            self.queue_panel.set_workflow_running(False)
+            self.queue_panel.set_workflow_stoppable(False)
+
+            self.set_shell_state(
+                ShellState.IDLE
+            )
+
+            return
+
         if self.dispatcher.running_task is not None:
             if exit_code == 0:
                 self.dispatcher.running_task.status = (
@@ -222,6 +247,13 @@ class MainWindow(Gtk.ApplicationWindow):
                 )
                 self.dispatcher.running_task.exit_code = exit_code
                 self.dispatcher.running_task.finished_at = datetime.now()
+
+                duration = self.dispatcher.running_task.duration_seconds()
+
+                self.session_log.add(
+                    "COMMAND OK",
+                    f"{self.dispatcher.running_task.command} exit={exit_code} duration={duration:.2f}s",
+                )
 
                 self.scheduler.complete(
                     self.dispatcher.running_task
@@ -238,6 +270,13 @@ class MainWindow(Gtk.ApplicationWindow):
 
                 self.dispatcher.running_task.exit_code = exit_code
                 self.dispatcher.running_task.finished_at = datetime.now()
+
+                duration = self.dispatcher.running_task.duration_seconds()
+
+                self.session_log.add(
+                    "COMMAND FAILED",
+                    f"{self.dispatcher.running_task.command} exit={exit_code} duration={duration:.2f}s",
+                )
 
                 self.scheduler.complete(
                     self.dispatcher.running_task
@@ -283,6 +322,11 @@ class MainWindow(Gtk.ApplicationWindow):
             StepStatus.RUNNING.value,
         )
 
+        self.session_log.add(
+            "COMMAND START",
+            task.command,
+        )
+
         self.dispatcher.run(task)
 
         self.refresh_queue_panel()
@@ -293,6 +337,12 @@ class MainWindow(Gtk.ApplicationWindow):
             self.refresh_workflow_tree()
 
         self.workflow_mode = True
+
+        self.session_log.add(
+            "RUN START",
+            self.current_workflow.name,
+        )
+
         self.run_next_if_available()
 
         self.queue_panel.set_workflow_running(True)
@@ -342,6 +392,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self.current_workflow = workflow
 
     def new_workflow(self):
+        self.scheduler.running_task = None
+        self.dispatcher.running_task = None
+
         self.scheduler.clear()
         self.scheduler.clear_history()
 
@@ -366,6 +419,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def load_workflow_file(self, path):
         workflow = load_workflow(path)
+
+        self.scheduler.running_task = None
+        self.dispatcher.running_task = None
 
         self.scheduler.clear()
         self.scheduler.clear_history()
@@ -425,6 +481,7 @@ class MainWindow(Gtk.ApplicationWindow):
         file_menu.append("Open…", "win.open-workflow")
         file_menu.append("Save", "win.save-workflow")
         file_menu.append("Save As…", "win.save-workflow-as")
+        file_menu.append("Export as Script…", "win.export-script")
 
         menu.append_submenu("File", file_menu)
 
@@ -436,6 +493,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "open-workflow": self.on_file_open,
             "save-workflow": self.on_file_save,
             "save-workflow-as": self.on_file_save_as,
+            "export-script": self.on_file_export_script,
         }
 
         for name, callback in actions.items():
@@ -649,6 +707,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.workflow_paused = True
         self.queue_panel.set_workflow_paused(True)
 
+        self.session_log.add(
+            "PAUSE",
+            self.current_workflow.name,
+        )
 
     def on_resume_workflow(self, panel):
         self.workflow_paused = False
@@ -656,6 +718,11 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if self.workflow_mode:
             self.run_next_if_available()
+
+        self.session_log.add(
+            "RESUME",
+            self.current_workflow.name,
+        )
 
     def refresh_workflow_tree(self):
         self.workflow_tree.refresh(
@@ -737,6 +804,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return steps
 
     def regenerate_queue_from_workflow(self):
+        self.scheduler.running_task = None
+        self.dispatcher.running_task = None
+
         self.scheduler.clear()
 
         self.scheduler.add_workflow(
@@ -1071,19 +1141,33 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.current_workflow.propagate_statuses()
 
-        self.refresh_workflow_tree()
+        if status == StepStatus.RUNNING.value:
+            self.workflow_tree.select_step_by_id(step_id)
+        else:
+            self.refresh_workflow_tree()
 
     def on_stop_workflow(self, panel):
         self.workflow_mode = False
         self.workflow_paused = False
 
         self.queue_panel.set_workflow_paused(False)
-        self.queue_panel.set_workflow_running(False)
+
+        self.workflow_stopping = True
+
+        self.queue_panel.set_workflow_stopping(True)
+
         self.queue_panel.set_workflow_stoppable(False)
+
+        self.scheduler.running_task = None
+        self.dispatcher.running_task = None
 
         self.scheduler.clear()
 
         self.current_workflow.reset_statuses()
+
+        self.scheduler.add_workflow(
+            self.current_workflow
+        )
 
         self.refresh_queue_panel()
         self.refresh_workflow_tree()
@@ -1091,3 +1175,44 @@ class MainWindow(Gtk.ApplicationWindow):
         self.set_shell_state(
             ShellState.IDLE
         )
+
+    def on_file_export_script(self, action, parameter):
+        dialog = Gtk.FileDialog()
+
+        dialog.set_title(
+            "Export as Script"
+        )
+
+        dialog.save(
+            self,
+            None,
+            self.on_export_script_dialog_response,
+        )
+
+    def on_export_script_dialog_response(
+        self,
+        dialog,
+        result,
+    ):
+        try:
+            file = dialog.save_finish(
+                result
+            )
+        except Exception:
+            return
+
+        path = file.get_path()
+
+        if not path.endswith(".sh"):
+            path += ".sh"
+
+        script = workflow_to_bash_script(
+            self.current_workflow
+        )
+
+        with open(
+            path,
+            "w",
+            encoding="utf-8",
+        ) as output:
+            output.write(script)

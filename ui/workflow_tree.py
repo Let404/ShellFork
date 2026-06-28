@@ -2,7 +2,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gtk, GObject
+from gi.repository import Gtk, GObject, GLib
 
 from core.workflow import Workflow, WorkflowStep
 
@@ -176,6 +176,8 @@ class WorkflowTree(Gtk.Box):
 
     def refresh(self, workflow: Workflow):
         self.current_workflow = workflow
+        self.rebuild_step_paths(workflow)
+        self.step_widgets = {}
         self.clear()
 
         root = self.workflow_node(
@@ -253,6 +255,8 @@ class WorkflowTree(Gtk.Box):
         button = Gtk.Button(
             label=f"{self.status_icon(step.status)} {step.command}"
         )
+
+        self.step_widgets[step.id] = button
 
         button.set_halign(Gtk.Align.FILL)
         button.set_margin_start(
@@ -375,3 +379,94 @@ class WorkflowTree(Gtk.Box):
             return "⊘"
 
         return "?"
+
+    def select_step_by_id(self, step_id):
+        path = self.step_paths.get(step_id)
+
+        if path is None:
+            return
+
+        self.expand_path_parents(path)
+
+        self.selected_path = path
+        self.pending_scroll_step_id = step_id
+
+        self.refresh(
+            self.current_workflow
+        )
+
+        GLib.timeout_add(
+            50,
+            self.scroll_to_step,
+        )
+
+    def expand_path_parents(self, path):
+        root_key = self.path_key([])
+
+        if root_key in self.collapsed_paths:
+            self.collapsed_paths.remove(root_key)
+
+        current = []
+
+        for index in path[:-1]:
+            current.append(index)
+
+            key = self.path_key(current)
+
+            if key in self.collapsed_paths:
+                self.collapsed_paths.remove(key)
+
+    def rebuild_step_paths(self, workflow):
+        self.step_paths = {}
+
+        for index, step in enumerate(workflow.steps):
+            self.register_step_path(
+                step,
+                [index],
+            )
+
+    def register_step_path(self, step, path):
+        self.step_paths[step.id] = path
+
+        if step.type == "workflow":
+            for index, child in enumerate(step.steps):
+                self.register_step_path(
+                    child,
+                    path + [index],
+                )
+
+    def scroll_to_step(self):
+        step_id = getattr(
+            self,
+            "pending_scroll_step_id",
+            None,
+        )
+
+        if step_id is None:
+            return False
+
+        widget = self.step_widgets.get(step_id)
+
+        if widget is None:
+            return False
+
+        adjustment = self.scroll.get_vadjustment()
+
+        widget_y = widget.get_allocation().y
+        page_size = adjustment.get_page_size()
+
+        target = max(
+            0,
+            widget_y - page_size / 2,
+        )
+
+        adjustment.set_value(
+            min(
+                target,
+                adjustment.get_upper() - page_size,
+            )
+        )
+
+        widget.grab_focus()
+
+        return False
