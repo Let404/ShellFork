@@ -12,6 +12,8 @@
 - **Live status tracking** — Each step in the workflow tree is updated in real time: `queued`, `running`, `completed`, `failed`, or `cancelled`. Status bubbles up from commands to their parent sub-workflows automatically.
 - **Queue panel** — A dedicated panel shows the current queue and execution history with per-task status and timing information. Tasks can be reordered (move up / move down), cancelled individually, or the queue can be cleared entirely.
 - **Pause & resume** — Running workflows can be paused after the current command finishes, then resumed at any point.
+- **Export as script** — Any workflow can be exported to a standalone Bash script via **File → Export as Script…**. The exported `.sh` file preserves the workflow's structure as comments and runs with `set -e`.
+- **Session log** — ShellFork records a timestamped log of significant events (workflow start, command completion, failures, cancellations) for the current session, queryable at any time.
 - **Workflow files (`.sfw`)** — Workflows are saved as human-readable JSON files with the `.sfw` extension. They can be opened, edited, and shared. The format supports nested sub-workflows with stable UUIDs per step.
 - **New / Open / Save / Save As** — Full file management via the menu bar, including unsaved-changes protection before closing or opening another file.
 
@@ -68,6 +70,10 @@ Click **Run Workflow** to enqueue all commands. ShellFork will execute them one 
 - **Resume** — continue from where you left off.
 - **Stop** — cancel all remaining queued commands.
 
+### Exporting a workflow as a Bash script
+
+Use **File → Export as Script…** to save the current workflow as a `.sh` file. The exported script uses `set -e` (exit on first error) and preserves sub-workflow names as comments, making it easy to run outside of ShellFork or share with others.
+
 ### Workflow file format
 
 Workflows are stored as plain JSON:
@@ -107,7 +113,9 @@ shellfork/
 │   ├── workflow_io.py       # Save/load workflow files
 │   ├── scheduler.py         # Task queue management
 │   ├── dispatcher.py        # Sends commands to the terminal
-│   └── shell_monitor.py     # PROMPT_COMMAND-based exit-code detection
+│   ├── shell_monitor.py     # PROMPT_COMMAND-based exit-code detection
+│   ├── script_export.py     # Export workflows as Bash scripts
+│   └── session_log.py       # Timestamped in-session event log
 └── ui/
     ├── main_window.py        # Main application window
     ├── workflow_tree.py      # Workflow sidebar (GTK TreeView)
